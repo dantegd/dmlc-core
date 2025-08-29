@@ -35,7 +35,12 @@ if (NOT GTEST_FOUND)
     URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
   )
   set(gtest_force_shared_crt ${DMLC_FORCE_SHARED_CRT} CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(googletest)
+  FetchContent_GetProperties(googletest)
+  if(NOT googletest_POPULATED)
+    FetchContent_Populate(googletest)
+    # Key line: exclude gtest/gmock targets from the default 'all' target
+    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR} EXCLUDE_FROM_ALL)
+  endif()
 
   add_library(GTest::gtest ALIAS gtest)
   add_library(GTest::gmock ALIAS gmock)
@@ -50,6 +55,13 @@ if (NOT GTEST_FOUND)
         MSVC_RUNTIME_LIBRARY "${DMLC_MSVC_RUNTIME_LIBRARY}")
     endif()
   endforeach()
+
+  foreach(tgt gtest gmock gtest_main gmock_main)
+    if(TARGET ${tgt})
+      set_target_properties(${tgt} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
+  endforeach()
+
 else()
   target_include_directories(dmlc_unit_tests PRIVATE ${GTEST_INCLUDE_DIRS})
   foreach(target GTest::gtest GTest::gmock)
