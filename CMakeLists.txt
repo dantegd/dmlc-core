@@ -1,6 +1,11 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_policy(SET CMP0091 NEW)
 
-project(dmlc VERSION 0.3 LANGUAGES C CXX)
+project(dmlc VERSION 0.6 LANGUAGES C CXX)
+
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+  cmake_policy(SET CMP0135 NEW)
+endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/build/private/local_config.cmake)
   include(${CMAKE_CURRENT_SOURCE_DIR}/build/private/local_config.cmake)
@@ -19,7 +24,6 @@ dmlccore_option(USE_AZURE "Build with AZURE support" OFF)
 dmlccore_option(USE_S3 "Build with S3 support" OFF)
 dmlccore_option(USE_PARQUET "Build with Arrow Parquet" OFF)
 dmlccore_option(USE_OPENMP "Build with OpenMP" ON)
-dmlccore_option(USE_CXX14_IF_AVAILABLE "Build with C++14 if the compiler supports it" OFF)
 dmlccore_option(GOOGLE_TEST "Build google tests" OFF)
 dmlccore_option(INSTALL_DOCUMENTATION "Install documentation" OFF)
 dmlccore_option(DMLC_FORCE_SHARED_CRT "Build with dynamic CRT on Windows (/MD)" OFF)
@@ -29,15 +33,6 @@ set(DMLC_ENABLED_SANITIZERS "address" "leak" CACHE STRING
   address, leak and thread.")
 
 include(CheckCXXCompilerFlag)
-if(USE_CXX14_IF_AVAILABLE)
-  check_cxx_compiler_flag("-std=c++14" SUPPORT_CXX14)
-endif()
-if(SUPPORT_CXX14)
-  set(CMAKE_CXX_STANDARD 14)
-else()
-  set(CMAKE_CXX_STANDARD 11)
-endif()
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 FILE(GLOB SOURCE "src/*.cc")
 FILE(GLOB_RECURSE SOURCE_INCLUDE "include/*")
@@ -62,7 +57,7 @@ add_library(dmlc ${SOURCE})
 set_target_properties(dmlc PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
-target_compile_features(dmlc PUBLIC cxx_std_${CMAKE_CXX_STANDARD})
+target_compile_features(dmlc PUBLIC cxx_std_14)
 
 # Sanitizer
 if (DMLC_USE_SANITIZER)
@@ -122,14 +117,14 @@ else()
 endif()
 
 # OpenMP
+include(cmake/FindOpenMPMacOS.cmake)
 if(USE_OPENMP)
-  if(APPLE AND (NOT CMAKE_COMPILER_IS_GNUCC))
-    # Require CMake 3.16+ for Mac to ensure that OpenMP can be located
-    # (Exception: it's okay if Homebrew GCC is used)
-    cmake_minimum_required(VERSION 3.16)
+  if(APPLE)
+    find_openmp_macos()
+    patch_openmp_path_macos(dmlc libdmlc)
+  else()
+    find_package(OpenMP REQUIRED)
   endif()
-
-  find_package(OpenMP REQUIRED)
   target_link_libraries(dmlc PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
@@ -191,12 +186,15 @@ if(MSVC)
   target_compile_definitions(dmlc PUBLIC -DDMLC_USE_CXX11=1)
   if(DMLC_FORCE_SHARED_CRT)
     message(STATUS "DMLC-Core: Using dynamically linked MSVC runtime...")
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set(DMLC_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   else()
     message(STATUS "DMLC-Core: Using statically linked MSVC runtime...")
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set(DMLC_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   endif()
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "${DMLC_MSVC_RUNTIME_LIBRARY}")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+  set_target_properties(dmlc PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${DMLC_MSVC_RUNTIME_LIBRARY}")
 else()
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   check_cxx_compiler_flag("-msse2" SUPPORT_MSSE2)
@@ -210,10 +208,7 @@ else()
     target_compile_options(dmlc PRIVATE -O3)
   endif()
 
-  target_compile_definitions(dmlc PUBLIC -DDMLC_USE_CXX11=1)
-  if(SUPPORT_CXX14)
-    target_compile_definitions(dmlc PUBLIC -DDMLC_USE_CXX14=1)
-  endif()
+  target_compile_definitions(dmlc PUBLIC -DDMLC_USE_CXX11=1 -DDMLC_USE_CXX14=1)
 endif()
 
 
@@ -267,5 +262,5 @@ add_custom_target(dmlc_lint COMMAND ${CMAKE_COMMAND} -DMSVC=${MSVC} -DPYTHON_EXE
 # Setup testing
 if(GOOGLE_TEST)
   include(CTest)
-  add_subdirectory(test/unittest)
+  add_subdirectory(test)
 endif()
